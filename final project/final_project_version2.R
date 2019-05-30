@@ -84,13 +84,20 @@ out$delta_buy = out$attimebuy- out$lag7dayhits_buy
 out$delta_sell = out$attimesell- out$lag7dayhits_sell
 out$diff_delta = out$delta_buy-out$delta_sell
 
+insample = out[Date < '2017-01-01',]
+outsample = out[Date >= '2017-01-01',]
 reg1 = lm(data = out, ret1day ~  attimebuy + attimesell + delta_buy + delta_sell)
 summary(reg1)
 
 reg2 = lm(data = out, ret1week ~  attimebuy + attimesell + delta_buy + delta_sell)
 summary(reg2)
 
+reg3 = lm(data = insample, ret1day ~  attimebuy + attimesell + delta_buy + delta_sell)
+summary(reg3)
+
 out$predict_ret1day = predict(reg1)
+
+outsample$predict_ret1day = predict(reg3, outsample)
 
 strat1 = out[,c(1,6,11)]
 strat1 = strat1[order(strat1$Date),]
@@ -98,15 +105,32 @@ strat1 = as.data.table(strat1)
 strat1[predict_ret1day >= 0, buy_or_sell := 1]
 strat1[predict_ret1day < 0, buy_or_sell := -1]
 
-dowjone = as.data.table(read.csv('DJIA_table.csv'))
+#outsample strat
+strat2 = outsample[,c(1,6,11)]
+strat2 = strat2[order(strat2$Date),]
+strat2 = as.data.table(strat2)
+strat2[predict_ret1day >= 0, buy_or_sell := 1]
+strat2[predict_ret1day < 0, buy_or_sell := -1]
+
+getSymbols('DJI',src='yahoo')
+#dowjone = as.data.table(read.csv('DJIA_table.csv'))
+dowjone = as.data.table(DJI)
+colnames(dowjone)[c(1,7)] = c('Date', 'Adj.Close')
 dowjone = dowjone[order(dowjone$Date),]
 dowjone$Date = as.Date(dowjone$Date)
-dowjone = dowjone[Date >= '2013-01-11',]
-dowjone$holding_ret = dowjone$Adj.Close/dowjone$Adj.Close[1]
-strat_dj_merged = merge(dowjone, strat1, by.x = 'Date', by.y = 'Date', all.x = T)
+dowjone1 = dowjone[Date >= '2013-01-11' & Date <= '2017-06-14',]
+dowjone1$holding_ret = dowjone1$Adj.Close/dowjone1$Adj.Close[1]
+dowjone2 = dowjone[Date >= '2017-01-01' & Date <= '2017-06-14',]
+dowjone2$holding_ret = dowjone2$Adj.Close/dowjone2$Adj.Close[1]
+strat_dj_merged = merge(dowjone1, strat1, by.x = 'Date', by.y = 'Date', all.x = T)
 strat_dj_merged[, strat_ret := ret1day * buy_or_sell + 1]
 strat_dj_merged[is.na(strat_ret), strat_ret := 1]
 strat_dj_merged[, cum_ret := cumprod(strat_ret)]
+
+strat_dj_merged2 = merge(dowjone2, strat2, by.x = 'Date', by.y = 'Date', all.x = T)
+strat_dj_merged2[, strat_ret := ret1day * buy_or_sell + 1]
+strat_dj_merged2[is.na(strat_ret), strat_ret := 1]
+strat_dj_merged2[, cum_ret := cumprod(strat_ret)]
 
 dates = sort(unique(strat_dj_merged$Date))
 n = length(dates)
@@ -124,4 +148,19 @@ outcome[, cum_ret := cumprod(my_strat_ret)]
 ggplot(data = outcome, aes(x = dates)) + geom_line(aes(y = bnh_ret, col = 'buy and hold')) +
   geom_line(aes(y = cum_ret, col = 'google trend strategy'))
 
+dates = sort(unique(strat_dj_merged2$Date))
+n = length(dates)
+bnh_ret = rep(0, n)
+my_strat_ret = rep(0,n)
+for (i in 1:n){
+  temp = strat_dj_merged2[Date == dates[i],]
+  bnh_ret[i] = temp$holding_ret[1]
+  my_strat_ret[i] = mean(temp$strat_ret)
+}
+outcome = data.table(dates)
+outcome = cbind(outcome, bnh_ret, my_strat_ret)
+outcome[, cum_ret := cumprod(my_strat_ret)]
+
+ggplot(data = outcome, aes(x = dates)) + geom_line(aes(y = bnh_ret, col = 'buy and hold')) +
+  geom_line(aes(y = cum_ret, col = 'google trend strategy')) + ggtitle('out of sample result')
 
